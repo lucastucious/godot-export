@@ -21,6 +21,10 @@ inputs:
     description: If "true", all exported files will be archived into a ".zip" file.
     default: false
     required: false
+  project_name:
+    description: If provided, export and archives will be exported in a subfolder.
+    default: 'all'
+    required: false
   archive_root_folder:
     description: If "true", files that are archived will be placed in a root folder within the archive.
     default: false
