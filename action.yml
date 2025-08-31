@@ -65,6 +65,10 @@ inputs:
     description: If "true", fail when Godot reports script or parse errors during project import.
     default: false
     required: false
+  project_version:
+    description: The version of your project. Sets the project settings `Application/Version` in Godot.
+    default: ''
+    required: false
     
 
 outputs:
