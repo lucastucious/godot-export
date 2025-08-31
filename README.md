@@ -48,7 +48,7 @@ Define at least 1 export preset by going to `Project -> Export` in the Godot edi
 | `export_as_pack`                      | Export project files as a .pck file                                                                                                                                                                                                                                                  | `boolean` | `false` | No       |
 | `presets_to_export`                   | A comma-separated list of export presets to export. If not specified, all presets will be exported. EX: `Windows, Mac OSX, android`                                                                                                                                                  | `string`  | `''`    | No       |
 | `validate_project` | Validate the Godot project before exporting. If Godot reports script or parse errors during project import, the action fails and no export is performed. | `boolean` | `false` | No |
-| `project_version`                     | The version of your project. Sets the project settings `Application/Version` in Godot. | `string`  | `''`    | No       |
+| `project_version`                     | The version of your project. Sets the project settings `Application/Config/Version` in Godot. Useful for embedding version info into the exported game. | `string`  | `''`    | No       |
 
 ### Action Outputs
 
