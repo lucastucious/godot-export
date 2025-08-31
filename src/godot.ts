@@ -25,6 +25,7 @@ import {
   CACHE_ACTIVE,
   GODOT_PROJECT_PATH,
   VALIDATE_PROJECT,
+  PROJECT_VERSION,
 } from './constants';
 
 const GODOT_EXECUTABLE = 'godot_executable';
@@ -51,6 +52,10 @@ async function exportBuilds(): Promise<BuildResult[]> {
   core.startGroup('🔍 Adding Editor Settings');
   await addEditorSettings();
   core.endGroup();
+
+  if (PROJECT_VERSION) {
+    await setProjectVersion();
+  }
 
   if (WINE_PATH) {
     configureWindowsExport();
@@ -404,6 +409,48 @@ async function addEditorSettings(): Promise<void> {
   const editorSettingsPath = path.join(GODOT_CONFIG_PATH, EDITOR_SETTINGS_FILENAME);
   await io.cp(editorSettingsDist, editorSettingsPath, { force: false });
   core.info(`Wrote editor settings to ${editorSettingsPath}`);
+}
+
+function setProjectVersion(): void {
+  // Always update or insert config/version under [application] section
+  const projectFilePath = GODOT_PROJECT_FILE_PATH;
+  const content = fs.readFileSync(projectFilePath, { encoding: 'utf8' });
+  const lines = content.split(/\r?\n/);
+  let inApplication = false;
+  let versionSet = false;
+  const output: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith('[application]')) {
+      inApplication = true;
+      output.push(line);
+      continue;
+    }
+    if (inApplication && line.startsWith('[')) {
+      // Leaving [application] section, insert version if not set
+      if (!versionSet && PROJECT_VERSION) {
+        output.push(`config/version = "${PROJECT_VERSION}"`);
+        versionSet = true;
+      }
+      inApplication = false;
+    }
+    if (inApplication && line.trim().startsWith('config/version')) {
+      if (PROJECT_VERSION) {
+        output.push(`config/version = "${PROJECT_VERSION}"`);
+      }
+      versionSet = true;
+      continue;
+    }
+    output.push(line);
+  }
+  // If [application] is at the end and version not set
+  if (inApplication && !versionSet && PROJECT_VERSION) {
+    output.push(`config/version = "${PROJECT_VERSION}"`);
+  }
+  fs.writeFileSync(projectFilePath, output.join('\n'), { encoding: 'utf8' });
+  if (PROJECT_VERSION) {
+    core.info(`Set project version to ${PROJECT_VERSION}`);
+  }
 }
 
 function configureWindowsExport(): void {

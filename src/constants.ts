@@ -17,6 +17,7 @@ const ARCHIVE_ROOT_FOLDER = core.getBooleanInput('archive_root_folder');
 const USE_GODOT_3 = core.getBooleanInput('use_godot_3');
 const EXPORT_PACK_ONLY = core.getBooleanInput('export_as_pack');
 const VALIDATE_PROJECT = core.getBooleanInput('validate_project');
+const PROJECT_VERSION = core.getInput('project_version');
 
 // Parse export targets
 const exportPresetsStr = core.getInput('presets_to_export').trim();
@@ -75,4 +76,5 @@ export {
   USE_PRESET_EXPORT_PATH,
   WINE_PATH,
   VALIDATE_PROJECT,
+  PROJECT_VERSION,
 };
