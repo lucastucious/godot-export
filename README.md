@@ -1,3 +1,6 @@
+> Custom version forked from [firebelley/godot-export](https://github.com/firebelley/godot-export).  
+> `source` branch should be up-to-date
+
 # Godot Export
 A workflow action to automatically export your Godot games. Supports standard and **Mono** builds!
 
