@@ -47,8 +47,8 @@ Define at least 1 export preset by going to `Project -> Export` in the Godot edi
 | `use_godot_3`                         | Build using Godot 3 executable. **NOTE**: `godot_executable_download_url` and `godot_export_templates_download_url` still need to be configured to download the correct version.                                                                                                     | `boolean` | `false` | No       |
 | `export_as_pack`                      | Export project files as a .pck file                                                                                                                                                                                                                                                  | `boolean` | `false` | No       |
 | `presets_to_export`                   | A comma-separated list of export presets to export. If not specified, all presets will be exported. EX: `Windows, Mac OSX, android`                                                                                                                                                  | `string`  | `''`    | No       |
-| `validate_project` | Validate the Godot project before exporting. If Godot reports script or parse errors during project import, the action fails and no export is performed. | `boolean` | `false` | No |
-
+| `validate_project` | Validate the Godot project before exporting. If Godot reports script or parse errors during project import, the action fails and no export is performed. | `boolean` | `false` | No ||
+| `project_version`                     | The version of your project. If set, writes `Application/Config/Version` in Godot and appends the version to the output name (the zip filename if `archive_output` is `true`, otherwise the exported files). Empty or `false` disables this (default). `true` auto-detects the version from the existing `Application/Config/Version`, falling back to the triggering git tag. Any other value is used literally. | `string`  | `''`    | No       |
 
 ### Action Outputs
 
@@ -96,6 +96,7 @@ jobs:
         godot_export_templates_download_url: https://downloads.tuxfamily.org/godotengine/4.0/Godot_v4.0-stable_export_templates.tpz
         relative_project_path: ./
         archive_output: true
+        project_version: true
 
       # This release action has worked well for me. However, you can most likely use any release action of your choosing.
       # https://github.com/ncipollo/release-action

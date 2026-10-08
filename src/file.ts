@@ -1,7 +1,9 @@
 import { BuildResult } from './types/GodotExport';
 import path from 'path';
+import * as fs from 'fs';
 import * as io from '@actions/io';
 import { exec } from '@actions/exec';
+import sanitize from 'sanitize-filename';
 import {
   ARCHIVE_ROOT_FOLDER,
   GODOT_ARCHIVE_PATH,
@@ -11,13 +13,13 @@ import {
 } from './constants';
 import * as core from '@actions/core';
 
-async function zipBuildResults(buildResults: BuildResult[]): Promise<void> {
+async function zipBuildResults(buildResults: BuildResult[], version: string | null): Promise<void> {
   core.startGroup('⚒️ Zipping binaries');
   const promises: Promise<void>[] = [];
   for (const buildResult of buildResults) {
     promises.push(
       (async function () {
-        await zipBuildResult(buildResult);
+        await zipBuildResult(buildResult, version);
         core.info(`📦 Zipped ${buildResult.preset.name} to ${buildResult.archivePath}`);
       })(),
     );
@@ -26,10 +28,11 @@ async function zipBuildResults(buildResults: BuildResult[]): Promise<void> {
   core.endGroup();
 }
 
-async function zipBuildResult(buildResult: BuildResult): Promise<void> {
+async function zipBuildResult(buildResult: BuildResult, version: string | null): Promise<void> {
   await io.mkdirP(GODOT_ARCHIVE_PATH);
 
-  const zipPath = path.join(GODOT_ARCHIVE_PATH, `${buildResult.sanitizedName}.zip`);
+  const versionSuffix = version ? `_${sanitize(version)}` : '';
+  const zipPath = path.join(GODOT_ARCHIVE_PATH, `${buildResult.sanitizedName}${versionSuffix}.zip`);
 
   const isMac = buildResult.preset.platform.toLowerCase() === 'mac osx';
   const endsInDotApp = !!buildResult.preset.export_path.match('.app$');
@@ -45,6 +48,40 @@ async function zipBuildResult(buildResult: BuildResult): Promise<void> {
   await exec('7z', ['a', zipPath, `${buildResult.directory}${ARCHIVE_ROOT_FOLDER ? '' : '/*'}`]);
 
   buildResult.archivePath = zipPath;
+}
+
+/**
+ * Appends the version to each export's output files in-place, preserving the pairing between an
+ * executable and files that share its basename (e.g. "game.exe" + "game.pck" -> "game_1.2.0.exe" +
+ * "game_1.2.0.pck"). Used when `archive_output` is not set, since there is no zip name to version.
+ */
+function renameBuildFilesWithVersion(buildResults: BuildResult[], version: string): void {
+  core.startGroup('🏷️ Appending version to export files');
+  const sanitizedVersion = sanitize(version);
+
+  for (const buildResult of buildResults) {
+    const stem = path.basename(buildResult.preset.export_path).split('.')[0];
+    const entries = fs.readdirSync(buildResult.directory);
+
+    for (const entry of entries) {
+      if (entry.split('.')[0] !== stem) {
+        continue;
+      }
+
+      const oldPath = path.join(buildResult.directory, entry);
+      const newEntry = `${stem}_${sanitizedVersion}${entry.slice(stem.length)}`;
+      const newPath = path.join(buildResult.directory, newEntry);
+
+      fs.renameSync(oldPath, newPath);
+      core.info(`Renamed ${oldPath} to ${newPath}`);
+
+      if (path.basename(buildResult.executablePath) === entry) {
+        buildResult.executablePath = newPath;
+      }
+    }
+  }
+
+  core.endGroup();
 }
 
 async function moveBuildsToExportDirectory(buildResults: BuildResult[], moveArchived?: boolean): Promise<void> {
@@ -83,4 +120,4 @@ async function moveBuildsToExportDirectory(buildResults: BuildResult[], moveArch
   core.endGroup();
 }
 
-export { zipBuildResults, moveBuildsToExportDirectory };
+export { zipBuildResults, renameBuildFilesWithVersion, moveBuildsToExportDirectory };

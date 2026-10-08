@@ -25,6 +25,7 @@ import {
   CACHE_ACTIVE,
   GODOT_PROJECT_PATH,
   VALIDATE_PROJECT,
+  PROJECT_VERSION,
 } from './constants';
 
 const GODOT_EXECUTABLE = 'godot_executable';
@@ -36,12 +37,12 @@ const GODOT_TEMPLATES_PATH = path.join(GODOT_WORKING_PATH, 'templates');
 
 let godotExecutablePath: string;
 
-async function exportBuilds(): Promise<BuildResult[]> {
+async function exportBuilds(): Promise<{ results: BuildResult[]; version: string | null }> {
   if (!hasExportPresets()) {
     core.setFailed(
       'No export_presets.cfg found. Please ensure you have defined at least one export via the Godot editor.',
     );
-    return [];
+    return { results: [], version: null };
   }
 
   core.startGroup('🕹️ Downloading Godot');
@@ -51,6 +52,13 @@ async function exportBuilds(): Promise<BuildResult[]> {
   core.startGroup('🔍 Adding Editor Settings');
   await addEditorSettings();
   core.endGroup();
+
+  const version = resolveProjectVersion();
+  if (version) {
+    core.startGroup('🔧 Setting Project Version');
+    setProjectVersion(version);
+    core.endGroup();
+  }
 
   if (WINE_PATH) {
     configureWindowsExport();
@@ -65,7 +73,7 @@ async function exportBuilds(): Promise<BuildResult[]> {
   const results = await doExport();
   core.endGroup();
 
-  return results;
+  return { results, version };
 }
 
 function hasExportPresets(): boolean {
@@ -404,6 +412,101 @@ async function addEditorSettings(): Promise<void> {
   const editorSettingsPath = path.join(GODOT_CONFIG_PATH, EDITOR_SETTINGS_FILENAME);
   await io.cp(editorSettingsDist, editorSettingsPath, { force: false });
   core.info(`Wrote editor settings to ${editorSettingsPath}`);
+}
+
+/**
+ * Reads the existing `config/version` from the `[application]` section of `project.godot`, if any.
+ */
+function readProjectVersion(): string {
+  const content = fs.readFileSync(GODOT_PROJECT_FILE_PATH, { encoding: 'utf8' });
+  const lines = content.split(/\r?\n/);
+  let inApplication = false;
+
+  for (const line of lines) {
+    if (line.startsWith('[')) {
+      inApplication = line.startsWith('[application]');
+      continue;
+    }
+    if (inApplication) {
+      const match = line.trim().match(/^config\/version\s*=\s*"([^"]*)"$/);
+      if (match) {
+        return match[1];
+      }
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Resolves the project version to use for this export, based on the `project_version` input:
+ * - `''` or `false`: the feature is off, returns `null`.
+ * - `true`: "auto" mode. Uses the existing `config/version` from `project.godot` if set, otherwise
+ *   falls back to the name of the tag that triggered the workflow (`GITHUB_REF_NAME`).
+ * - any other string: used literally.
+ */
+function resolveProjectVersion(): string | null {
+  if (!PROJECT_VERSION || PROJECT_VERSION.toLowerCase() === 'false') {
+    return null;
+  }
+
+  if (PROJECT_VERSION.toLowerCase() !== 'true') {
+    return PROJECT_VERSION;
+  }
+
+  const existing = readProjectVersion();
+  if (existing) {
+    return existing;
+  }
+
+  const tagName = process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : undefined;
+  if (tagName) {
+    return tagName;
+  }
+
+  core.warning(
+    'project_version was set to "true" (auto), but no existing config/version was found in project.godot and this workflow was not triggered by a tag. No project version will be set.',
+  );
+  return null;
+}
+
+/**
+ * Updates or inserts `config/version` under the `[application]` section of `project.godot`.
+ */
+function setProjectVersion(version: string): void {
+  const content = fs.readFileSync(GODOT_PROJECT_FILE_PATH, { encoding: 'utf8' });
+  const lines = content.split(/\r?\n/);
+  let inApplication = false;
+  let versionSet = false;
+  const output: string[] = [];
+
+  for (const line of lines) {
+    if (line.startsWith('[application]')) {
+      inApplication = true;
+      output.push(line);
+      continue;
+    }
+    if (inApplication && line.startsWith('[')) {
+      // Leaving [application] section, insert version if not set
+      if (!versionSet) {
+        output.push(`config/version = "${version}"`);
+        versionSet = true;
+      }
+      inApplication = false;
+    }
+    if (inApplication && line.trim().startsWith('config/version')) {
+      output.push(`config/version = "${version}"`);
+      versionSet = true;
+      continue;
+    }
+    output.push(line);
+  }
+  // If [application] is at the end and version not set
+  if (inApplication && !versionSet) {
+    output.push(`config/version = "${version}"`);
+  }
+  fs.writeFileSync(GODOT_PROJECT_FILE_PATH, output.join('\n'), { encoding: 'utf8' });
+  core.info(`Set project version to ${version}`);
 }
 
 function configureWindowsExport(): void {

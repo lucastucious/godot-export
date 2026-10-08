@@ -65,7 +65,10 @@ inputs:
     description: If "true", fail when Godot reports script or parse errors during project import.
     default: false
     required: false
-    
+  project_version:
+    description: If set, this is appended to the output name (the zip filename if "archive_output" is "true", otherwise the exported files). Set to "true" to auto-detect the version from the project's existing `Application/Config/Version` setting, or, if that is unset, from the git tag that triggered the workflow. Any other value is used literally.
+    default: false
+    required: false
 
 outputs:
   build_directory:

@@ -7,17 +7,19 @@ import {
   RELATIVE_EXPORT_PATH,
   USE_PRESET_EXPORT_PATH,
 } from './constants';
-import { zipBuildResults, moveBuildsToExportDirectory } from './file';
+import { zipBuildResults, renameBuildFilesWithVersion, moveBuildsToExportDirectory } from './file';
 
 async function main(): Promise<number> {
-  const buildResults = await exportBuilds();
+  const { results: buildResults, version } = await exportBuilds();
   if (!buildResults.length) {
     core.setFailed('No valid export presets found, exiting.');
     return 1;
   }
 
   if (ARCHIVE_OUTPUT) {
-    await zipBuildResults(buildResults);
+    await zipBuildResults(buildResults, version);
+  } else if (version) {
+    renameBuildFilesWithVersion(buildResults, version);
   }
 
   if (RELATIVE_EXPORT_PATH || USE_PRESET_EXPORT_PATH) {

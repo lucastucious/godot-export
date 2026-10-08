@@ -77055,6 +77055,7 @@ const ARCHIVE_ROOT_FOLDER = core.getBooleanInput('archive_root_folder');
 const USE_GODOT_3 = core.getBooleanInput('use_godot_3');
 const EXPORT_PACK_ONLY = core.getBooleanInput('export_as_pack');
 const VALIDATE_PROJECT = core.getBooleanInput('validate_project');
+const PROJECT_VERSION = core.getInput('project_version');
 // Parse export targets
 const exportPresetsStr = core.getInput('presets_to_export').trim();
 let exportPresets = null;
@@ -77101,7 +77102,7 @@ let godotExecutablePath;
 async function exportBuilds() {
     if (!hasExportPresets()) {
         core.setFailed('No export_presets.cfg found. Please ensure you have defined at least one export via the Godot editor.');
-        return [];
+        return { results: [], version: null };
     }
     core.startGroup('🕹️ Downloading Godot');
     await downloadGodot();
@@ -77109,6 +77110,12 @@ async function exportBuilds() {
     core.startGroup('🔍 Adding Editor Settings');
     await addEditorSettings();
     core.endGroup();
+    const version = resolveProjectVersion();
+    if (version) {
+        core.startGroup('🔧 Setting Project Version');
+        setProjectVersion(version);
+        core.endGroup();
+    }
     if (WINE_PATH) {
         configureWindowsExport();
     }
@@ -77118,7 +77125,7 @@ async function exportBuilds() {
     }
     const results = await doExport();
     core.endGroup();
-    return results;
+    return { results, version };
 }
 function hasExportPresets() {
     try {
@@ -77406,6 +77413,89 @@ async function addEditorSettings() {
     await io.cp(editorSettingsDist, editorSettingsPath, { force: false });
     core.info(`Wrote editor settings to ${editorSettingsPath}`);
 }
+/**
+ * Reads the existing `config/version` from the `[application]` section of `project.godot`, if any.
+ */
+function readProjectVersion() {
+    const content = external_fs_.readFileSync(GODOT_PROJECT_FILE_PATH, { encoding: 'utf8' });
+    const lines = content.split(/\r?\n/);
+    let inApplication = false;
+    for (const line of lines) {
+        if (line.startsWith('[')) {
+            inApplication = line.startsWith('[application]');
+            continue;
+        }
+        if (inApplication) {
+            const match = line.trim().match(/^config\/version\s*=\s*"([^"]*)"$/);
+            if (match) {
+                return match[1];
+            }
+        }
+    }
+    return '';
+}
+/**
+ * Resolves the project version to use for this export, based on the `project_version` input:
+ * - `''` or `false`: the feature is off, returns `null`.
+ * - `true`: "auto" mode. Uses the existing `config/version` from `project.godot` if set, otherwise
+ *   falls back to the name of the tag that triggered the workflow (`GITHUB_REF_NAME`).
+ * - any other string: used literally.
+ */
+function resolveProjectVersion() {
+    if (!PROJECT_VERSION || PROJECT_VERSION.toLowerCase() === 'false') {
+        return null;
+    }
+    if (PROJECT_VERSION.toLowerCase() !== 'true') {
+        return PROJECT_VERSION;
+    }
+    const existing = readProjectVersion();
+    if (existing) {
+        return existing;
+    }
+    const tagName = process.env.GITHUB_REF_TYPE === 'tag' ? process.env.GITHUB_REF_NAME : undefined;
+    if (tagName) {
+        return tagName;
+    }
+    core.warning('project_version was set to "true" (auto), but no existing config/version was found in project.godot and this workflow was not triggered by a tag. No project version will be set.');
+    return null;
+}
+/**
+ * Updates or inserts `config/version` under the `[application]` section of `project.godot`.
+ */
+function setProjectVersion(version) {
+    const content = external_fs_.readFileSync(GODOT_PROJECT_FILE_PATH, { encoding: 'utf8' });
+    const lines = content.split(/\r?\n/);
+    let inApplication = false;
+    let versionSet = false;
+    const output = [];
+    for (const line of lines) {
+        if (line.startsWith('[application]')) {
+            inApplication = true;
+            output.push(line);
+            continue;
+        }
+        if (inApplication && line.startsWith('[')) {
+            // Leaving [application] section, insert version if not set
+            if (!versionSet) {
+                output.push(`config/version = "${version}"`);
+                versionSet = true;
+            }
+            inApplication = false;
+        }
+        if (inApplication && line.trim().startsWith('config/version')) {
+            output.push(`config/version = "${version}"`);
+            versionSet = true;
+            continue;
+        }
+        output.push(line);
+    }
+    // If [application] is at the end and version not set
+    if (inApplication && !versionSet) {
+        output.push(`config/version = "${version}"`);
+    }
+    external_fs_.writeFileSync(GODOT_PROJECT_FILE_PATH, output.join('\n'), { encoding: 'utf8' });
+    core.info(`Set project version to ${version}`);
+}
 function configureWindowsExport() {
     core.startGroup('📝 Appending Wine editor settings');
     const rceditPath = external_path_.join(__dirname, 'rcedit-x64.exe');
@@ -77488,21 +77578,24 @@ async function importProject() {
 
 
 
-async function zipBuildResults(buildResults) {
+
+
+async function zipBuildResults(buildResults, version) {
     core.startGroup('⚒️ Zipping binaries');
     const promises = [];
     for (const buildResult of buildResults) {
         promises.push((async function () {
-            await zipBuildResult(buildResult);
+            await zipBuildResult(buildResult, version);
             core.info(`📦 Zipped ${buildResult.preset.name} to ${buildResult.archivePath}`);
         })());
     }
     await Promise.all(promises);
     core.endGroup();
 }
-async function zipBuildResult(buildResult) {
+async function zipBuildResult(buildResult, version) {
     await io.mkdirP(GODOT_ARCHIVE_PATH);
-    const zipPath = external_path_default().join(GODOT_ARCHIVE_PATH, `${buildResult.sanitizedName}.zip`);
+    const versionSuffix = version ? `_${sanitize_filename_default()(version)}` : '';
+    const zipPath = external_path_default().join(GODOT_ARCHIVE_PATH, `${buildResult.sanitizedName}${versionSuffix}.zip`);
     const isMac = buildResult.preset.platform.toLowerCase() === 'mac osx';
     const endsInDotApp = !!buildResult.preset.export_path.match('.app$');
     // in case mac doesn't export a zip, move the file
@@ -77514,6 +77607,33 @@ async function zipBuildResult(buildResult) {
     // 7zip automatically overwrites files that are in the way
     await (0,exec.exec)('7z', ['a', zipPath, `${buildResult.directory}${ARCHIVE_ROOT_FOLDER ? '' : '/*'}`]);
     buildResult.archivePath = zipPath;
+}
+/**
+ * Appends the version to each export's output files in-place, preserving the pairing between an
+ * executable and files that share its basename (e.g. "game.exe" + "game.pck" -> "game_1.2.0.exe" +
+ * "game_1.2.0.pck"). Used when `archive_output` is not set, since there is no zip name to version.
+ */
+function renameBuildFilesWithVersion(buildResults, version) {
+    core.startGroup('🏷️ Appending version to export files');
+    const sanitizedVersion = sanitize_filename_default()(version);
+    for (const buildResult of buildResults) {
+        const stem = external_path_default().basename(buildResult.preset.export_path).split('.')[0];
+        const entries = external_fs_.readdirSync(buildResult.directory);
+        for (const entry of entries) {
+            if (entry.split('.')[0] !== stem) {
+                continue;
+            }
+            const oldPath = external_path_default().join(buildResult.directory, entry);
+            const newEntry = `${stem}_${sanitizedVersion}${entry.slice(stem.length)}`;
+            const newPath = external_path_default().join(buildResult.directory, newEntry);
+            external_fs_.renameSync(oldPath, newPath);
+            core.info(`Renamed ${oldPath} to ${newPath}`);
+            if (external_path_default().basename(buildResult.executablePath) === entry) {
+                buildResult.executablePath = newPath;
+            }
+        }
+    }
+    core.endGroup();
 }
 async function moveBuildsToExportDirectory(buildResults, moveArchived) {
     core.startGroup(`➡️ Moving exports`);
@@ -77553,13 +77673,16 @@ async function moveBuildsToExportDirectory(buildResults, moveArchived) {
 
 
 async function main() {
-    const buildResults = await exportBuilds();
+    const { results: buildResults, version } = await exportBuilds();
     if (!buildResults.length) {
         core.setFailed('No valid export presets found, exiting.');
         return 1;
     }
     if (ARCHIVE_OUTPUT) {
-        await zipBuildResults(buildResults);
+        await zipBuildResults(buildResults, version);
+    }
+    else if (version) {
+        renameBuildFilesWithVersion(buildResults, version);
     }
     if (RELATIVE_EXPORT_PATH || USE_PRESET_EXPORT_PATH) {
         await moveBuildsToExportDirectory(buildResults, ARCHIVE_OUTPUT);
